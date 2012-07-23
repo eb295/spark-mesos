@@ -1,5 +1,7 @@
 package spark
 
+import java.util.{Map => JMap, HashMap => JHashMap}
+
 abstract class Dependency[T](val rdd: RDD[T], val isShuffle: Boolean) extends Serializable
 
 abstract class NarrowDependency[T](rdd: RDD[T]) extends Dependency(rdd, false) {
@@ -10,7 +12,8 @@ class ShuffleDependency[K, V, C](
     val shuffleId: Int,
     @transient rdd: RDD[(K, V)],
     val aggregator: Aggregator[K, V, C],
-    val partitioner: Partitioner)
+    val partitioner: Partitioner,
+    val createMap: () => JMap[Any, Any])
   extends Dependency(rdd, true)
 
 class OneToOneDependency[T](rdd: RDD[T]) extends NarrowDependency[T](rdd) {

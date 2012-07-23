@@ -421,19 +421,6 @@ class OrderedRDDFunctions[K <% Ordered[K]: ClassManifest, V: ClassManifest](
     new SortedRDD(rangePartitionedRDD, ascending)
   }
 }
-
-class SortedRDD[K <% Ordered[K], V](prev: RDD[(K, V)], ascending: Boolean)
-  extends RDD[(K, V)](prev.context) {
-
-  override def splits = prev.splits
-  override val partitioner = prev.partitioner
-  override val dependencies = List(new OneToOneDependency(prev))
-
-  override def compute(split: Split) = {
-    prev.iterator(split).toArray
-      .sortWith((x, y) => if (ascending) x._1 < y._1 else x._1 > y._1).iterator
-  }
-} 
  
 class MappedValuesRDD[K, V, U](prev: RDD[(K, V)], f: V => U) extends RDD[(K, U)](prev.context) {
   override def splits = prev.splits

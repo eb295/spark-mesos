@@ -107,31 +107,52 @@ class ShuffleMapTask(
   override def run(attemptId: Long): BlockManagerId = {
     val numOutputSplits = dep.partitioner.numPartitions
     val aggregator = dep.aggregator.asInstanceOf[Aggregator[Any, Any, Any]]
-    val partitioner = dep.partitioner
-    val buckets = Array.tabulate(numOutputSplits)(_ => new HashMap[Any, Any])
-    for (elem <- rdd.iterator(split)) {
-      val (k, v) = elem.asInstanceOf[(Any, Any)]
+    val partitioner = dep.partitioner.asInstanceOf[Partitioner]
+    val maxBytes = ShuffleBucket.getMaxHashBytes
+    var usingExternalHash = false
+    var bytesUsed = 0L
+    val bucketSize = maxBytes/numOutputSplits
+    val pairRDDIter = rdd.iterator(split).asInstanceOf[Iterator[(Any, Any)]]
+    var buckets: Array[ShuffleBucket[Any, Any, Any]]= Array.tabulate(numOutputSplits)(_=> 
+      new InternalBucket(aggregator, dep.createMap(), bucketSize))
+
+    var numInserted = 0
+    var avgObjSize = 0L
+    
+    // Take a sample of map entry size after inserting 5000 into memory
+    while(pairRDDIter.hasNext) {
+      val (k, v) = pairRDDIter.next()
       var bucketId = partitioner.getPartition(k)
       val bucket = buckets(bucketId)
-      var existing = bucket.get(k)
-      if (existing == null) {
-        bucket.put(k, aggregator.createCombiner(v))
+      bucket.put(k, v)
+      numInserted += 1
+      if (numInserted == 5000) {
+        bytesUsed = SizeEstimator.estimate(buckets)
+        avgObjSize = bytesUsed/5000
+      }
+      if (!usingExternalHash && bytesUsed > maxBytes) {
+        // replace in-memory InternalBucket with one used for external hashing
+        buckets = buckets.map(bucket =>
+          new ExternalBucket(bucket.asInstanceOf[InternalBucket[Any, Any, Any]], numInserted, avgObjSize))
+        usingExternalHash = true
       } else {
-        bucket.put(k, aggregator.mergeValue(existing, v))
+        bytesUsed += avgObjSize
       }
     }
+
     val ser = SparkEnv.get.serializer.newInstance()
     val blockManager = SparkEnv.get.blockManager
     for (i <- 0 until numOutputSplits) {
       val blockId = "shuffleid_" + dep.shuffleId + "_" + partition + "_" + i
-      val arr = new ArrayBuffer[Any]
-      val iter = buckets(i).entrySet().iterator()
-      while (iter.hasNext()) {
-        val entry = iter.next()
-        arr += ((entry.getKey(), entry.getValue()))
+      val iter = buckets(i).bucketIterator()
+      val storageLvl = {
+        if (usingExternalHash) {
+          StorageLevel.DISK_AND_MEMORY 
+        } else {
+          StorageLevel.MEMORY_ONLY
+        }
       }
-      // TODO: This should probably be DISK_ONLY
-      blockManager.put(blockId, arr.iterator, StorageLevel.MEMORY_ONLY, false)
+      blockManager.put(blockId, iter, storageLvl, false)
     }
     return SparkEnv.get.blockManager.blockManagerId
   }

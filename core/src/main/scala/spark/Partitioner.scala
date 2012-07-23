@@ -40,7 +40,7 @@ class RangePartitioner[K <% Ordered[K]: ClassManifest, V](
     val maxSampleSize = partitions * 10.0
     val frac = math.min(maxSampleSize / math.max(rddSize, 1), 1.0)
     val rddSample = rdd.sample(true, frac, 1).map(_._1).collect()
-      .sortWith((x, y) => if (ascending) x < y else x > y)
+      .sortWith((x, y) => x < y)
     if (rddSample.length == 0) {
       Array()
     } else {

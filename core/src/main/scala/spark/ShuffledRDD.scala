@@ -1,6 +1,6 @@
 package spark
 
-import java.util.{HashMap => JHashMap}
+import java.util.{Map => JMap, HashMap => JHashMap}
 
 class ShuffledRDDSplit(val idx: Int) extends Split {
   override val index = idx
@@ -12,7 +12,7 @@ class ShuffledRDD[K, V, C](
     aggregator: Aggregator[K, V, C],
     part : Partitioner) 
   extends RDD[(K, C)](parent.context) {
-  //override val partitioner = Some(part)
+
   override val partitioner = Some(part)
   
   @transient
@@ -22,30 +22,36 @@ class ShuffledRDD[K, V, C](
   
   override def preferredLocations(split: Split) = Nil
   
-  val dep = new ShuffleDependency(context.newShuffleId, parent, aggregator, part)
+  val makeMap: () => JMap[Any, Any] = ShuffleBucket.makeMap[K, C]
+  val dep = new ShuffleDependency(context.newShuffleId, parent, aggregator, part, makeMap)
   override val dependencies = List(dep)
 
   override def compute(split: Split): Iterator[(K, C)] = {
-    val combiners = new JHashMap[K, C]
+    val maxBytes = ShuffleBucket.getMaxHashBytes
+    var combiners: ShuffleBucket[K, V, C] = new InternalBucket(aggregator, makeMap(), maxBytes)
+    var bytesUsed = 0L
+    var pairsMerged = 0
+    var avgCombinerSize = 0L
+    var usingExternalHash = false
+
     def mergePair(k: K, c: C) {
-      val oldC = combiners.get(k)
-      if (oldC == null) {
-        combiners.put(k, c)
+      combiners.merge(k, c)
+      pairsMerged += 1
+      if (pairsMerged == 1000) {
+        bytesUsed = SizeEstimator.estimate(combiners)
+        avgCombinerSize = bytesUsed/1000
+      }
+      if (!usingExternalHash && bytesUsed > maxBytes) {
+        combiners = 
+          new ExternalBucket(combiners.asInstanceOf[InternalBucket[K, V, C]], pairsMerged, avgCombinerSize)
+          usingExternalHash = true
       } else {
-        combiners.put(k, aggregator.mergeCombiners(oldC, c))
+        bytesUsed += avgCombinerSize
       }
     }
+
     val fetcher = SparkEnv.get.shuffleFetcher
     fetcher.fetch[K, C](dep.shuffleId, split.index, mergePair)
-    return new Iterator[(K, C)] {
-      var iter = combiners.entrySet().iterator()
-
-      def hasNext: Boolean = iter.hasNext()
-
-      def next(): (K, C) = {
-        val entry = iter.next()
-        (entry.getKey, entry.getValue)
-      }
-    }
+    return combiners.bucketIterator()
   }
 }

@@ -37,7 +37,7 @@ class CoGroupedRDD[K](@transient rdds: Seq[RDD[(_, _)]], part: Partitioner)
       } else {
         logInfo("Adding shuffle dependency with " + rdd)
         deps += new ShuffleDependency[Any, Any, ArrayBuffer[Any]](
-            context.newShuffleId, rdd, aggr, part)
+            context.newShuffleId, rdd, aggr, part, ShuffleBucket.makeMap[Any, Any])
       }
     }
     deps.toList
