@@ -55,7 +55,11 @@ class ExternalBucket[K, V, C](
   }
   
   private def writeToPartition(key: K, toWrite: C, size: Long) = {
-    val partitionFileNum = key.hashCode % numPartitions
+    var partitionFileNum = key.hashCode % numPartitions
+    // Handle negative hashcodes
+    if (partitionFileNum < 0) {
+      partitionFileNum = partitionFileNum + numPartitions
+    }
     val tup = (key, toWrite)
     fileBuffers.write(tup, partitionFileNum, size)
   }
@@ -76,7 +80,7 @@ class ExternalBucket[K, V, C](
 
       // Load the next partition into the in-memory hash table, and return its iterator.
       def loadNextPartition(): Iterator[(K, C)] = {
-        val bufferIter = fileBuffers.getBufferIterator(0).asInstanceOf[Iterator[(K, C)]]
+        val bufferIter = fileBuffers.getBufferedIterator(0).asInstanceOf[Iterator[(K, C)]]
         val merger = {
           if (fileBuffers.fitsInMemory(0, maxBytes)) {
             inMemBucket

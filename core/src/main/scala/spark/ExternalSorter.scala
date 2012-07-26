@@ -9,7 +9,7 @@ import scala.runtime.ScalaRunTime._
 
 
 object ExternalSorter {
-  def getNumBuffers = System.getProperty("spark.sortedRDD.fanIn", "128").toInt
+  def getFanIn = System.getProperty("spark.sortedRDD.fanIn", "128").toInt
   def getNumBuckets = System.getProperty("spark.sortedRDD.numBuckets", "64").toInt
 
   def getMaxSortBytes: Long = {
@@ -25,7 +25,7 @@ object ExternalSorter {
       ascending: Boolean): Iterator[(K, V)] = {
     
     // This will be the max fan-in during merge 
-    val fanIn = ExternalSorter.getNumBuffers
+    val fanIn = ExternalSorter.getFanIn
     val bufferSize = maxBytes/fanIn
     val op = "ReplacementSelection-MergeSort"
   
@@ -60,7 +60,13 @@ object ExternalSorter {
 
           // Enqueue the next input KV. If it's smaller than the KV to be written out,
           // make it part of a new run.
-          val newInputRun = if (key < outputKey) outputRun + 1 else outputRun
+          val newInputRun = {
+           if (key < outputKey) {
+             outputRun + 1 
+             } else {
+             outputRun
+	     }
+	  }
           val newInput = ((key, newInputRun), value)
           currentSet.enqueue(newInput)
         }
@@ -74,7 +80,7 @@ object ExternalSorter {
       }
       // Force the last output buffer to disk
       fileBuffers.forceToDisk(currentRun)
-      
+
       fileBuffers
     }
   
@@ -82,70 +88,85 @@ object ExternalSorter {
       var numMergePasses = math.ceil(math.log(fileBuffers.numBuffers)/math.log(fanIn))
       val mergeQueue = new PriorityQueue[((K, Int), V)]()(KeyOrdering)
 
-      def mergeRun(start: Int, numToMerge: Int, currentOutputRun: Int): Int = {
+      def mergeRun(start: Int, numToMerge: Int, currentOutputRun: Int, firstRun: Boolean): Int = {
         val inputBufferIters = new Array[Iterator[((K, Int), V)]](numToMerge)
-
         var runsMerged = 0
         mergeQueue.clear()
+
         // Get input file iterators, enqueue KVs into the current set.
         for (i <- start until start + numToMerge) {
-          val buffer = fileBuffers.getBufferIterator(i)
-          if (buffer.hasNext) mergeQueue.enqueue(buffer.next())
-          inputBufferIters(i - start) = buffer
+          val bufferIter = fileBuffers.getBufferedIterator(i)
+          if (bufferIter.hasNext) mergeQueue.enqueue(bufferIter.next())
+          inputBufferIters(i - start) = bufferIter
         }
         while (!mergeQueue.isEmpty) {
-          val output = mergeQueue.dequeue()
-          val outputRun = output._1._2
+          val ((key, inputRun), value) = mergeQueue.dequeue()
+          // Update the output run #
+          val output = {
+            if (firstRun) {
+              ((key, 0), value)
+            } else {
+              ((key, currentOutputRun), value)
+	    }
+	  }
           fileBuffers.write(output, currentOutputRun)
           // Check if there are elements left in the input file. If so, enqueue.
-          if (inputBufferIters(outputRun - start).hasNext) {
-            mergeQueue.enqueue(inputBufferIters(outputRun - start).next())
+          if (inputBufferIters(inputRun - start).hasNext) {
+            mergeQueue.enqueue(inputBufferIters(inputRun - start).next())
           } else {
             runsMerged += 1
-            fileBuffers.clear(outputRun)
+            fileBuffers.reset(inputRun)
           }
         }
         // Finished merging. Force buffer to disk.
         fileBuffers.forceToDisk(currentOutputRun)
+
         return runsMerged
       }
 
-      // fileBuffers.numBuffers = totalToMerge + 1, currentOutputRun = ceil(totalToMerge/fanIn)
+      // Start merge passes
       while (numMergePasses > 0) {
-        val totalToMerge = fileBuffers.numBuffers
-        // Files to merge for the each run
-        var numToMerge = math.min(fileBuffers.numBuffers, fanIn)
-        // FileBuffer indices for each merge run.
+        var totalToMerge = fileBuffers.numBuffers
+        // Files to merge for the each merge
+        var numToMerge = math.min(totalToMerge, fanIn)
+        // Starting fileBuffers index for each merge run.
         var start = 0
         // Add one buffer as a temp to hold the first merge output
         var currentOutputRun = fileBuffers.numBuffers
         fileBuffers.addBuffer()
+        var firstRun = true
 
-        while (numToMerge != 0) {
-          val merged = mergeRun(start, numToMerge, currentOutputRun)
-          start = start + merged
-          numToMerge = math.min(totalToMerge - merged, fanIn)
+        // Merge totalToMerge files for this pass
+        while (totalToMerge > 0) {
+          val merged = mergeRun(start, numToMerge, currentOutputRun, firstRun)
+
           // If first merge run of this pass just finished, move it from the end to to index 0
-          if (currentOutputRun == fileBuffers.numBuffers - 1) {
-            fileBuffers.move(currentOutputRun, 0)
+          if (firstRun) {
+            fileBuffers.replace(currentOutputRun, 0)
             currentOutputRun = 1
+            firstRun = false
           } else {
             currentOutputRun += 1
           }
+
+          start = start + merged
+          totalToMerge -= merged
+          numToMerge = math.min(totalToMerge, fanIn)
         }
-        // Delete empty files
+
+        // Delete empty files and update merge count
         fileBuffers.deleteEmptyFiles()
         numMergePasses -= 1
       }
-      return fileBuffers.getBufferIterator(0)
+      return fileBuffers.getBufferedIterator(0)
     }
-  
-    // Sort by run first, then key. Used for pass 0. 
+
+    // Sort by run first, then key. Used for pass 0.
     implicit object KeyRunOrdering extends Ordering[((K, Int), V)] {
       def compare(x: ((K, Int), V), y: ((K, Int), V)) = {
         val (xKey, xRun) = x._1
         val (yKey, yRun) = y._1
-        val runCompare = yRun.compare(xRun) 
+        val runCompare = yRun.compare(xRun)
         if (runCompare == 0) {
           if (ascending) yKey.compare(xKey) else xKey.compare(yKey)
         } else {
@@ -231,6 +252,7 @@ object ExternalSorter {
       val part = getPartition(kv._1)
       fileBuffers.write(kv, part)
     }
+    dataInMem.clear()
 
     while (inputIter.hasNext) {
       val outputKV = inputIter.next()
@@ -258,7 +280,7 @@ object ExternalSorter {
             val block = blockIter.next()
             block.sortWith((x, y) => if (ascending) x._1 < y._1 else x._1 > y._1).iterator
           } else {
-            val bufferIter = fileBuffers.getBufferIterator(0)
+            val bufferIter = fileBuffers.getBufferedIterator(0)
             var size = 0L
             while(bufferIter.hasNext && size < maxBytes) {
               dataInMem.append(bufferIter.next())

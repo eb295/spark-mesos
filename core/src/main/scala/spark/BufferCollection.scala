@@ -20,18 +20,18 @@ class BufferCollection[T: ClassManifest](
   private val tmpDir = Utils.createTempDir()
   private val ser = SparkEnv.get.serializer.newInstance()
   private val fileBuffers = new ObjectArrayList[FileBuffer]
-  for (i <- 0 until numInitialBuffers) {
-    fileBuffers.add(new FileBuffer(0L, 0, new ArrayBuffer[Any], 
-      new File(tmpDir, "spark-" + op + "-" + UUID.randomUUID.toString)))
-  }
+  for (i <- 0 until numInitialBuffers) { addBuffer() }
    
   class FileBuffer(
       var size: Long, 
       var blocksWritten: Int, 
       val buffer: ArrayBuffer[Any], 
       val file: File) {
-    val serializeStream = ser.serializeStream(
+    var serializeStream: SerializationStream = _
+    def initSerializeStream() = {
+      serializeStream = ser.serializeStream(
       new FastBufferedOutputStream(new FileOutputStream(file)))
+    }
   }
   
   def write(toWrite: Any, bufferNum: Int, size: Long = avgObjSize, measureSize: Boolean = true) {
@@ -91,10 +91,10 @@ class BufferCollection[T: ClassManifest](
     }
   }
 
-  def getBufferIterator(bufferNum: Int): Iterator[T] = {
+  def getBufferedIterator(bufferNum: Int): Iterator[T] = {
     return new Iterator[T] {
       val blockIter = getBlockIterator(bufferNum)
-      var bufferIter = blockIter.next().iterator
+      var bufferIter = if (blockIter.hasNext) blockIter.next().iterator else Iterator.empty
 
       def hasNext(): Boolean = blockIter.hasNext || bufferIter.hasNext
 
@@ -109,16 +109,17 @@ class BufferCollection[T: ClassManifest](
     }
   }
 
-  def clear(bufferNum: Int) = {
+  def reset(bufferNum: Int) = {
     val fileBuffer = fileBuffers.get(bufferNum)
     fileBuffer.buffer.clear()
+    fileBuffer.initSerializeStream
     fileBuffer.blocksWritten = 0
     fileBuffer.size = 0
   }
 
   def numBuffers = fileBuffers.size
   
-  def move(oldBufferNum: Int, newBufferNum: Int) = {
+  def replace(oldBufferNum: Int, newBufferNum: Int) = {
     val oldBuffer = fileBuffers.get(oldBufferNum)
     fileBuffers.set(newBufferNum, oldBuffer)
     fileBuffers.remove(oldBufferNum)
@@ -146,9 +147,10 @@ class BufferCollection[T: ClassManifest](
     }
   }
   
-  def addBuffer(bufferSize: Long = maxBufferSize, index: Int = numBuffers) {
+  def addBuffer(index: Int = numBuffers) {
     val newBuffer = new FileBuffer(0L, 0, new ArrayBuffer[Any], 
       new File(tmpDir, "spark-" + op + "-" + UUID.randomUUID.toString))
+    newBuffer.initSerializeStream
     fileBuffers.add(newBuffer)
   }
 }
