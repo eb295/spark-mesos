@@ -3,8 +3,10 @@ package spark
 import java.net.URL
 import java.io.EOFException
 import java.io.ObjectInputStream
+import java.util.{Map => JMap, HashMap => JHashMap}
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.HashMap
+
 
 sealed trait CoGroupSplitDep extends Serializable
 case class NarrowCoGroupSplitDep(rdd: RDD[_], split: Split) extends CoGroupSplitDep
@@ -37,7 +39,7 @@ class CoGroupedRDD[K](@transient rdds: Seq[RDD[(_, _)]], part: Partitioner)
       } else {
         logInfo("Adding shuffle dependency with " + rdd)
         deps += new ShuffleDependency[Any, Any, ArrayBuffer[Any]](
-            context.newShuffleId, rdd, aggr, part, ShuffleBucket.makeMap[Any, Any])
+            context.newShuffleId, rdd, aggr, part, () => new JHashMap[Any, Any])
       }
     }
     deps.toList

@@ -1,4 +1,4 @@
-package spark;
+package spark
 
 import it.unimi.dsi.fastutil.io.{FastBufferedInputStream, FastBufferedOutputStream}
 import it.unimi.dsi.fastutil.objects.ObjectArrayList
@@ -6,49 +6,54 @@ import it.unimi.dsi.fastutil.objects.ObjectArrayList
 import java.io.File
 import java.io.{FileInputStream,FileOutputStream}
 import java.io.{EOFException,IOException}
-import java.io.ObjectOutputStream
 import java.util.UUID
 
 import scala.collection.mutable.ArrayBuffer
 
+/** A wrapper for an ArrayList of output buffers and files
+ *
+ * @param op 
+ * @param numInitialBuffers
+ * @param maxBufferSize
+ * @param avgObjSize
+ */
 class BufferCollection[T: ClassManifest](
-    val op: String, 
-    var numInitialBuffers: Int, 
-    val maxBufferSize: Long,
-    var avgObjSize: Long = 0L) extends Logging {
+    private val op: String, 
+    private var numInitialBuffers: Int, 
+    private val maxBufferSize: Long,
+    private var _avgObjSize: Long) extends Logging {
 
   private val tmpDir = Utils.createTempDir()
   private val ser = SparkEnv.get.serializer.newInstance()
   private val fileBuffers = new ObjectArrayList[FileBuffer]
   for (i <- 0 until numInitialBuffers) { addBuffer() }
-   
-  class FileBuffer(
+
+  private class FileBuffer(
       var size: Long, 
       var blocksWritten: Int, 
       val buffer: ArrayBuffer[Any], 
       val file: File) {
     var serializeStream: SerializationStream = _
-    def initSerializeStream() = {
+
+    def initSerializeStream() {
       serializeStream = ser.serializeStream(
-      new FastBufferedOutputStream(new FileOutputStream(file)))
+        new FastBufferedOutputStream(new FileOutputStream(file)))
     }
   }
   
-  def write(toWrite: Any, bufferNum: Int, size: Long = avgObjSize, measureSize: Boolean = true) {
+  def write(toWrite: Any, bufferNum: Int) {
     val fileBuffer = fileBuffers.get(bufferNum)
     fileBuffer.buffer.append(toWrite)
-    fileBuffer.size += size
-    if (fileBuffer.size > maxBufferSize) writeToDisk(fileBuffer, measureSize)
+    fileBuffer.size += _avgObjSize
+    if (fileBuffer.size > maxBufferSize) writeToDisk(fileBuffer)
   }
   
-  def writeToDisk(fileBuffer: FileBuffer, measureSize: Boolean) {
+  private def writeToDisk(fileBuffer: FileBuffer) {
     try {     
       if (!fileBuffer.buffer.isEmpty) {
         // Update the avg object size
-        if (measureSize) {
-          avgObjSize = (SizeEstimator.estimate(fileBuffer.buffer.toArray)
-            /fileBuffer.buffer.size + avgObjSize) / 2
-        }
+        _avgObjSize = (SizeEstimator.estimate(fileBuffer.buffer.toArray)
+          /fileBuffer.buffer.size + _avgObjSize) / 2
         val out = fileBuffer.serializeStream
         out.writeObject(fileBuffer.buffer)
         fileBuffer.buffer.clear()
@@ -56,13 +61,11 @@ class BufferCollection[T: ClassManifest](
         fileBuffer.blocksWritten += 1
       }
     } catch {
-      case e: IOException =>
-      logWarning("failed to write to file: " + fileBuffer.file.getName())
+      case e: Exception => logError("failed to write to file: " + fileBuffer.file.getName())
     }
   }
   
-  def forceToDisk(bufferNum: Int, measureSize: Boolean = true) = 
-    writeToDisk(fileBuffers.get(bufferNum), measureSize)
+  def forceToDisk(bufferNum: Int) = writeToDisk(fileBuffers.get(bufferNum))
 
   // Creates an iterator that returns an ArrayBuffer of elements T for each next() call
   def getBlockIterator(bufferNum: Int): Iterator[ArrayBuffer[T]] = {
@@ -109,7 +112,7 @@ class BufferCollection[T: ClassManifest](
     }
   }
 
-  def reset(bufferNum: Int) = {
+  def reset(bufferNum: Int) {
     val fileBuffer = fileBuffers.get(bufferNum)
     fileBuffer.buffer.clear()
     fileBuffer.initSerializeStream
@@ -119,30 +122,30 @@ class BufferCollection[T: ClassManifest](
 
   def numBuffers = fileBuffers.size
   
+  def avgObjSize = _avgObjSize
+  
   def replace(oldBufferNum: Int, newBufferNum: Int) = {
     val oldBuffer = fileBuffers.get(oldBufferNum)
     fileBuffers.set(newBufferNum, oldBuffer)
     fileBuffers.remove(oldBufferNum)
   }
 
-  def delete(bufferNum: Int) = {
+  def delete(bufferNum: Int) {
     val fileBuffer = fileBuffers.get(bufferNum)
     fileBuffer.file.delete()
     fileBuffers.remove(bufferNum)
+    Unit
   }
 
   def fitsInMemory(bufferNum: Int, maxBytes: Long): Boolean = {
     val blocksWritten = fileBuffers.get(bufferNum).blocksWritten
-    return (blocksWritten*maxBufferSize) < maxBytes
+    return (blocksWritten * maxBufferSize) < maxBytes
   }
 
-  def deleteEmptyFiles() = {
+  def deleteEmptyFiles() {
     for (i <- numBuffers - 1 to 0 by -1) {
       if (fileBuffers.get(i).blocksWritten == 0) {
-        val fileBuffer = fileBuffers.get(i)
-        fileBuffer.file.delete()
-        fileBuffer.buffer.clear()
-        fileBuffers.remove(i)
+        delete(i)
       }
     }
   }

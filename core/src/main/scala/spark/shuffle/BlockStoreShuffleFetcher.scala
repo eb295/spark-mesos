@@ -1,4 +1,4 @@
-package spark
+package spark.shuffle
 
 import java.io.EOFException
 import java.net.URL
@@ -6,6 +6,9 @@ import java.net.URL
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.HashMap
 
+import spark.Logging
+import spark.SparkEnv
+import spark.FetchFailedException
 import spark.storage.BlockException
 import spark.storage.BlockManagerId
 

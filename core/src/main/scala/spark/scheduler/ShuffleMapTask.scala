@@ -12,7 +12,11 @@ import com.ning.compress.lzf.LZFInputStream
 import com.ning.compress.lzf.LZFOutputStream
 
 import spark._
+import spark.shuffle.ShuffleBucket
+import spark.shuffle.InternalBucket
+import spark.shuffle.ExternalBucket
 import spark.storage._
+
 
 object ShuffleMapTask {
   val serializedInfoCache = new HashMap[Int, Array[Byte]]

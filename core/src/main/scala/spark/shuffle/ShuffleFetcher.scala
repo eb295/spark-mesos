@@ -1,4 +1,4 @@
-package spark
+package spark.shuffle
 
 abstract class ShuffleFetcher {
   // Fetch the shuffle outputs for a given ShuffleDependency, calling func exactly

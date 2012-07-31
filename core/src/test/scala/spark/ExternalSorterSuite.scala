@@ -53,9 +53,9 @@ class ExternalSorterSuite extends FunSuite {
     import scala.collection.mutable.ArrayBuffer
     import spark._
 
-    // Max 10 KVs fit in memory
+    // Pass dataInMemSize as maxBytes, so 10 KVs fit in memory
     val dataInMem = new ArrayBuffer[(Int, Int)](10)
-    for (i <- 0 until 10) dataInMem.append((9 - i, 9 - i))
+    for (i <- 0 until 10) { dataInMem.append((9 - i, 9 - i)) }
     val dataInMemSize = SizeEstimator.estimate(dataInMem)
     // Worst-case for replacement-selection is input in reverse order. 
     // This creates 500 files after the initial pass, so it does 2 merge passes with fanIn = 128.
@@ -111,8 +111,8 @@ class ExternalSorterSuite extends FunSuite {
   }
 
   test("Recursive bucketsort") {
-    System.setProperty("spark.sortedRDD.numBuckets", "5")
-    // Max 10 KVs fit in memory
+    System.setProperty("spark.externalSorter.numBuckets", "5")
+    // Pass dataInMemSize as maxBytes, so 10 KVs fit in memory
     val dataInMem = ArrayBuffer.fill(10) { (rand.nextInt(), rand.nextInt()) }
     val dataInMemSize = SizeEstimator.estimate(dataInMem)
     val initialTupSize = dataInMemSize/10

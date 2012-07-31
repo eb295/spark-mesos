@@ -1,4 +1,4 @@
-package spark
+package spark.shuffle
 
 import java.io._
 import java.net.URL

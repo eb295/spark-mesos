@@ -38,6 +38,7 @@ import org.apache.hadoop.mapreduce.TaskAttemptContext
 import spark.SparkContext._
 import spark.partial.BoundedDouble
 import spark.partial.PartialResult
+import spark.shuffle.ShuffledRDD
 
 /**
  * Extra functions available on RDDs of (key, value) pairs through an implicit conversion.
@@ -47,7 +48,8 @@ class PairRDDFunctions[K: ClassManifest, V: ClassManifest](
   extends Logging
   with Serializable {
 
-  def combineByKey[C](createCombiner: V => C,
+  def combineByKey[C: ClassManifest](
+      createCombiner: V => C,
       mergeValue: (C, V) => C,
       mergeCombiners: (C, C) => C,
       partitioner: Partitioner): RDD[(K, C)] = {
@@ -55,7 +57,8 @@ class PairRDDFunctions[K: ClassManifest, V: ClassManifest](
     new ShuffledRDD(self, aggregator, partitioner)
   }
 
-  def combineByKey[C](createCombiner: V => C,
+  def combineByKey[C: ClassManifest](
+      createCombiner: V => C,
       mergeValue: (C, V) => C,
       mergeCombiners: (C, C) => C,
       numSplits: Int): RDD[(K, C)] = {
@@ -155,7 +158,7 @@ class PairRDDFunctions[K: ClassManifest, V: ClassManifest](
     }
   }
 
-  def combineByKey[C](createCombiner: V => C,
+  def combineByKey[C: ClassManifest](createCombiner: V => C,
       mergeValue: (C, V) => C,
       mergeCombiners: (C, C) => C) : RDD[(K, C)] = {
     combineByKey(createCombiner, mergeValue, mergeCombiners, defaultPartitioner(self))

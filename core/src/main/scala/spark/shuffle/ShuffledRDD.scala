@@ -1,13 +1,15 @@
-package spark
+package spark.shuffle
 
 import java.util.{Map => JMap, HashMap => JHashMap}
+
+import spark._
 
 class ShuffledRDDSplit(val idx: Int) extends Split {
   override val index = idx
   override def hashCode(): Int = idx
 }
 
-class ShuffledRDD[K, V, C](
+class ShuffledRDD[K: ClassManifest, V, C: ClassManifest](
     @transient parent: RDD[(K, V)],
     aggregator: Aggregator[K, V, C],
     part : Partitioner) 
@@ -22,16 +24,18 @@ class ShuffledRDD[K, V, C](
   
   override def preferredLocations(split: Split) = Nil
   
-  val makeMap: () => JMap[Any, Any] = ShuffleBucket.makeMap[K, C]
-  val dep = new ShuffleDependency(context.newShuffleId, parent, aggregator, part, makeMap)
+  val kClass = implicitly[ClassManifest[K]].erasure.asInstanceOf[Class[K]]
+  val cClass = implicitly[ClassManifest[C]].erasure.asInstanceOf[Class[C]]
+  val createMap: () => JMap[Any, Any] = ShuffleBucket.makeMap(kClass, cClass)
+  val dep = new ShuffleDependency(context.newShuffleId, parent, aggregator, part, createMap)
   override val dependencies = List(dep)
 
   override def compute(split: Split): Iterator[(K, C)] = {
     val maxBytes = ShuffleBucket.getMaxHashBytes
-    var combiners: ShuffleBucket[K, V, C] = new InternalBucket(aggregator, makeMap(), maxBytes)
+    var combiners: ShuffleBucket[K, V, C] = new InternalBucket(aggregator, createMap(), maxBytes)
     var bytesUsed = 0L
     var pairsMerged = 0
-    var avgCombinerSize = 0L
+    var avgPairSize = 0L
     var usingExternalHash = false
 
     def mergePair(k: K, c: C) {
@@ -39,14 +43,14 @@ class ShuffledRDD[K, V, C](
       pairsMerged += 1
       if (pairsMerged == 1000) {
         bytesUsed = SizeEstimator.estimate(combiners)
-        avgCombinerSize = bytesUsed/1000
+        avgPairSize = bytesUsed/1000
       }
       if (!usingExternalHash && bytesUsed > maxBytes) {
         combiners = 
-          new ExternalBucket(combiners.asInstanceOf[InternalBucket[K, V, C]], pairsMerged, avgCombinerSize)
+          new ExternalBucket(combiners.asInstanceOf[InternalBucket[K, V, C]], pairsMerged, avgPairSize)
           usingExternalHash = true
       } else {
-        bytesUsed += avgCombinerSize
+        bytesUsed += avgPairSize
       }
     }
 

@@ -5,15 +5,12 @@ import java.util.Random
 import scala.collection.mutable.ArrayBuffer
 import scala.collection.mutable.PriorityQueue
 
-import scala.runtime.ScalaRunTime._
-
-
 object ExternalSorter {
-  def getFanIn = System.getProperty("spark.sortedRDD.fanIn", "128").toInt
-  def getNumBuckets = System.getProperty("spark.sortedRDD.numBuckets", "64").toInt
+  def getFanIn = System.getProperty("spark.externalSorter.fanIn", "128").toInt
+  def getNumBuckets = System.getProperty("spark.externalSorter.numBuckets", "64").toInt
 
   def getMaxSortBytes: Long = {
-    val SortMemFractToUse = System.getProperty("spark.sortedRDD.sortFraction", "0.25").toDouble
+    val SortMemFractToUse = System.getProperty("spark.externalSorter.sortFraction", "0.25").toDouble
     (Runtime.getRuntime.maxMemory * SortMemFractToUse).toLong
   }
 
@@ -30,7 +27,7 @@ object ExternalSorter {
     val op = "ReplacementSelection-MergeSort"
   
     // Replacement selection for pass 0. It uses maxMem + bufferSize memory. 
-    def generateRuns() = {
+    def generateRuns(): BufferCollection[((K, Int), V)] = {
       var currentSet = new PriorityQueue[((K, Int), V)]()(KeyRunOrdering)
       // Minimum overhead for another tuple: tuple ref(4) + Int(4) + min object size(8)
       val fileBuffers = new BufferCollection[((K, Int), V)](op, 1, bufferSize, initialTupSize + 16L)
@@ -38,7 +35,7 @@ object ExternalSorter {
       var currentRun = 0
   
       // Write out a KV to the current run, or start a new one
-      def writeToRun(output: ((K, Int), V)) = {
+      def writeToRun(output: ((K, Int), V)) {
         val outputRun = output._1._2
         if (outputRun != currentRun) {
           // Force output buffer to disk. 
@@ -61,12 +58,12 @@ object ExternalSorter {
           // Enqueue the next input KV. If it's smaller than the KV to be written out,
           // make it part of a new run.
           val newInputRun = {
-           if (key < outputKey) {
-             outputRun + 1 
-             } else {
-             outputRun
-	     }
-	  }
+            if (key < outputKey) {
+              outputRun + 1 
+            } else {
+              outputRun
+            }
+          }
           val newInput = ((key, newInputRun), value)
           currentSet.enqueue(newInput)
         }
@@ -107,8 +104,8 @@ object ExternalSorter {
               ((key, 0), value)
             } else {
               ((key, currentOutputRun), value)
-	    }
-	  }
+            }
+          }
           fileBuffers.write(output, currentOutputRun)
           // Check if there are elements left in the input file. If so, enqueue.
           if (inputBufferIters(inputRun - start).hasNext) {
@@ -220,7 +217,7 @@ object ExternalSorter {
         val rg = new Random(1)
         val oldData = dataInMem.iterator.map(_._1).toArray
         val sampleSize = (oldData.size * frac).ceil.toInt
-        for (i <- 1 to sampleSize) yield oldData(rg.nextInt(dataInMem.size)) 
+        for (i <- 1 to sampleSize) yield oldData(rg.nextInt(dataInMem.size))
       }
       sample = sample.sortWith((x, y) => x < y )
       if (sample.length == 0) {

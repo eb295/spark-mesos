@@ -2,9 +2,11 @@ package spark
 
 import akka.actor.ActorSystem
 
+import spark.network.ConnectionManager
+import spark.shuffle.ShuffleFetcher
+import spark.shuffle.ShuffleManager
 import spark.storage.BlockManager
 import spark.storage.BlockManagerMaster
-import spark.network.ConnectionManager
 import spark.util.AkkaUtils
 
 class SparkEnv (
@@ -74,7 +76,7 @@ object SparkEnv {
     val mapOutputTracker = new MapOutputTracker(actorSystem, isMaster)
 
     val shuffleFetcherClass = 
-      System.getProperty("spark.shuffle.fetcher", "spark.BlockStoreShuffleFetcher")
+      System.getProperty("spark.shuffle.fetcher", "spark.shuffle.BlockStoreShuffleFetcher")
     val shuffleFetcher = 
       Class.forName(shuffleFetcherClass).newInstance().asInstanceOf[ShuffleFetcher]
 
