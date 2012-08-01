@@ -7,7 +7,10 @@ import it.unimi.dsi.fastutil.objects.{Object2LongOpenHashMap, Object2ObjectOpenH
 import it.unimi.dsi.fastutil.objects.{Object2ShortOpenHashMap}
 import java.util.{HashMap => JHashMap, Map => JMap}
 
-
+/**
+ * Used to combine values and merge combiners in shuffle.
+ * Implemented by InternalBucket and ExternalBucket.
+ */
 trait ShuffleBucket[K, V, C] {
   def put(key: K, value: V)
   def merge(key: K, value: C)
@@ -15,6 +18,9 @@ trait ShuffleBucket[K, V, C] {
   def bucketIterator(): Iterator[(K, C)]
 }
 
+/**
+ * Contains helpers for Internal/ExternalBucket.
+ */
 object ShuffleBucket {
 
   def getNumPartitions = System.getProperty("spark.shuffleBucket.numPartitions", "64").toInt
@@ -24,12 +30,15 @@ object ShuffleBucket {
     (Runtime.getRuntime.maxMemory * hashMemFractToUse).toLong
   }
 
-  // Cast to JMap[Any, Any] for use in reduce.
+  /**
+   * Returns a closure for instantiating a Java Map based on key and combiner classes.
+   * Specialized Maps available for non-primitive keys.
+   */ 
   def makeMap(kClass: Class[_], cClass: Class[_]): () => JMap[Any, Any] = {
     if (kClass.isPrimitive) {
       return () => new JHashMap[Any, Any]
     } else {
-      // Match with Scala and Java primitives, otherwise default to Object2ObjectMap.
+      /** Match with Scala and Java primitives, otherwise default to Object2ObjectMap. */
       val createMap = cClass match {
         case c if (c == classOf[Boolean] || c == classOf[java.lang.Boolean]) => 
           () => new Object2BooleanOpenHashMap[Any]

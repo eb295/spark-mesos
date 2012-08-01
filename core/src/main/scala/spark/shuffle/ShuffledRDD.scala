@@ -32,11 +32,10 @@ class ShuffledRDD[K: ClassManifest, V, C: ClassManifest](
 
   override def compute(split: Split): Iterator[(K, C)] = {
     val maxBytes = ShuffleBucket.getMaxHashBytes
-    var combiners: ShuffleBucket[K, V, C] = new InternalBucket(aggregator, createMap(), maxBytes)
+    var combiners: ShuffleBucket[K, V, C] = new InternalBucket(aggregator, createMap())
     var bytesUsed = 0L
     var pairsMerged = 0
     var avgPairSize = 0L
-    var usingExternalHash = false
 
     def mergePair(k: K, c: C) {
       combiners.merge(k, c)
@@ -45,10 +44,12 @@ class ShuffledRDD[K: ClassManifest, V, C: ClassManifest](
         bytesUsed = SizeEstimator.estimate(combiners)
         avgPairSize = bytesUsed/1000
       }
-      if (!usingExternalHash && bytesUsed > maxBytes) {
-        combiners = 
-          new ExternalBucket(combiners.asInstanceOf[InternalBucket[K, V, C]], pairsMerged, avgPairSize)
-          usingExternalHash = true
+      if (bytesUsed > maxBytes) {
+        combiners = new ExternalBucket(
+          combiners.asInstanceOf[InternalBucket[K, V, C]], 
+          pairsMerged, 
+          avgPairSize, 
+          maxBytes)
       } else {
         bytesUsed += avgPairSize
       }

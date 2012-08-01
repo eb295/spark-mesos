@@ -118,12 +118,11 @@ class ShuffleMapTask(
     val bucketSize = maxBytes/numOutputSplits
     val pairRDDIter = rdd.iterator(split).asInstanceOf[Iterator[(Any, Any)]]
     var buckets: Array[ShuffleBucket[Any, Any, Any]]= Array.tabulate(numOutputSplits)(_=> 
-      new InternalBucket(aggregator, dep.createMap(), bucketSize))
+      new InternalBucket(aggregator, dep.createMap()))
 
     var numInserted = 0
     var avgObjSize = 0L
     
-    // Take a sample of map entry size after inserting 5000 into memory
     while(pairRDDIter.hasNext) {
       val (k, v) = pairRDDIter.next()
       var bucketId = partitioner.getPartition(k)
@@ -135,9 +134,12 @@ class ShuffleMapTask(
         avgObjSize = bytesUsed/5000
       }
       if (!usingExternalHash && bytesUsed > maxBytes) {
-        // replace in-memory InternalBucket with one used for external hashing
         buckets = buckets.map(bucket =>
-          new ExternalBucket(bucket.asInstanceOf[InternalBucket[Any, Any, Any]], numInserted, avgObjSize))
+          new ExternalBucket(
+            bucket.asInstanceOf[InternalBucket[Any, Any, Any]],
+            numInserted,
+            avgObjSize,
+            bucketSize))
         usingExternalHash = true
       } else {
         bytesUsed += avgObjSize

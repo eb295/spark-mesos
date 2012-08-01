@@ -10,16 +10,19 @@ import java.util.UUID
 
 import scala.collection.mutable.ArrayBuffer
 
-/** A wrapper for an ArrayList of output buffers and files
+/** Wrapper and operations for a list of buffers and files.
+ * Used by ExternalSorter.mergeSort() and bucketSort(), and ExternalBucket.
  *
- * @param op 
- * @param numInitialBuffers
- * @param maxBufferSize
- * @param avgObjSize
+ * @tparam T type of object written to file. Used for casting return Iterator type for
+ *           getBufferedIterator().
+ * @param op name of the operation using BufferCollection, used in creating temp files.
+ * @param numInitialBuffers number of initial files to create.
+ * @param maxBufferSize maximum size of each buffer.
+ * @param avgObjSize initial average size of each object to be written out.
  */
 class BufferCollection[T: ClassManifest](
     private val op: String, 
-    private var numInitialBuffers: Int, 
+    private val numInitialBuffers: Int, 
     private val maxBufferSize: Long,
     private var _avgObjSize: Long) extends Logging {
 
@@ -28,19 +31,29 @@ class BufferCollection[T: ClassManifest](
   private val fileBuffers = new ObjectArrayList[FileBuffer]
   for (i <- 0 until numInitialBuffers) { addBuffer() }
 
+  /** Represents a single output buffer.
+   *
+   * @param size byte size of the current buffer in memory.
+   * @param blocksWritten number of buffers written to file
+   * @paran buffer contains objects to be written to file
+   * @param file Java temp file to be written to
+   */
   private class FileBuffer(
       var size: Long, 
       var blocksWritten: Int, 
       val buffer: ArrayBuffer[Any], 
       val file: File) {
     var serializeStream: SerializationStream = _
-
+    
     def initSerializeStream() {
       serializeStream = ser.serializeStream(
         new FastBufferedOutputStream(new FileOutputStream(file)))
     }
   }
   
+  /**
+   * Write object to a buffer. Writes the buffer to disk if its size exceeds maxBufferSize.
+   */
   def write(toWrite: Any, bufferNum: Int) {
     val fileBuffer = fileBuffers.get(bufferNum)
     fileBuffer.buffer.append(toWrite)
@@ -48,27 +61,34 @@ class BufferCollection[T: ClassManifest](
     if (fileBuffer.size > maxBufferSize) writeToDisk(fileBuffer)
   }
   
+  /**
+   * Writes a buffer to file. Updates FileBuffer variables(state), and the avgObjSize of
+   * objects written out.
+   */
   private def writeToDisk(fileBuffer: FileBuffer) {
-    try {     
-      if (!fileBuffer.buffer.isEmpty) {
-        // Update the avg object size
+    if (!fileBuffer.buffer.isEmpty) {
+      try {     
         _avgObjSize = (SizeEstimator.estimate(fileBuffer.buffer.toArray)
-          /fileBuffer.buffer.size + _avgObjSize) / 2
+                       /fileBuffer.buffer.size + _avgObjSize) / 2
         val out = fileBuffer.serializeStream
         out.writeObject(fileBuffer.buffer)
         fileBuffer.buffer.clear()
         fileBuffer.size = 0
         fileBuffer.blocksWritten += 1
+      } catch {
+        case e: Exception => logError("failed to write to file: " + fileBuffer.file.getName())
       }
-    } catch {
-      case e: Exception => logError("failed to write to file: " + fileBuffer.file.getName())
     }
   }
-  
+
   def forceToDisk(bufferNum: Int) = writeToDisk(fileBuffers.get(bufferNum))
 
-  // Creates an iterator that returns an ArrayBuffer of elements T for each next() call
-  def getBlockIterator(bufferNum: Int): Iterator[ArrayBuffer[T]] = {
+  /**
+   * Helper method that returns an iterator over blocks of elements written to a file.
+   * This only iterates through elements written to file, so forceToDisk() must be
+   * called beforehand.
+   */
+  private def getBlockIterator(bufferNum: Int): Iterator[ArrayBuffer[T]] = {
     return new Iterator[ArrayBuffer[T]] {
       val fileBuffer = fileBuffers.get(bufferNum)
       fileBuffer.serializeStream.close()
@@ -94,6 +114,7 @@ class BufferCollection[T: ClassManifest](
     }
   }
 
+  /** Returns a block-buffered iterator for a file. */
   def getBufferedIterator(bufferNum: Int): Iterator[T] = {
     return new Iterator[T] {
       val blockIter = getBlockIterator(bufferNum)
@@ -112,6 +133,7 @@ class BufferCollection[T: ClassManifest](
     }
   }
 
+  /** Resets the FileBuffer for writing to. */
   def reset(bufferNum: Int) {
     val fileBuffer = fileBuffers.get(bufferNum)
     fileBuffer.buffer.clear()
@@ -124,7 +146,11 @@ class BufferCollection[T: ClassManifest](
   
   def avgObjSize = _avgObjSize
   
-  def replace(oldBufferNum: Int, newBufferNum: Int) = {
+  /**
+   * Sets the FileBuffer at index oldBufferNum to index newBufferNum, and deletes
+   * the old list index.
+   */
+  def replace(oldBufferNum: Int, newBufferNum: Int) {
     val oldBuffer = fileBuffers.get(oldBufferNum)
     fileBuffers.set(newBufferNum, oldBuffer)
     fileBuffers.remove(oldBufferNum)

@@ -4,10 +4,17 @@ import java.util.{Map => JMap}
 
 import spark.Aggregator
 
+/**
+ * Wrapper for in-memory Hashmap.
+ * Initialized in ShuffledRDD and ShuffleMapTask.
+ *
+ * @param aggregator an Aggregator for K, V, C types passed.
+ * @param hashMap a Java Map that holds (K, C) entries. K <: Object and V <: AnyVal pairs have
+ *                specialized Maps, detected in ShuffleBucket.makeMap(), called in ShuffledRDD.
+ */
 class InternalBucket[K, V, C](
     private val aggregator: Aggregator[K, V, C], 
-    private val hashMap: JMap[Any, Any], 
-    private val _maxBytes: Long)
+    private val hashMap: JMap[Any, Any])
   extends ShuffleBucket[K, V, C] {
 
   def put(key: K, value: V) {
@@ -31,8 +38,6 @@ class InternalBucket[K, V, C](
   def clear() = hashMap.clear()
 
   def numCombiners = hashMap.size
-
-  def maxBytes = _maxBytes
 
   def bucketIterator(): Iterator[(K, C)] = {
     return new Iterator[(K, C)] {
