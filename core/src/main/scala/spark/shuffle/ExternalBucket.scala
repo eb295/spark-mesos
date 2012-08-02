@@ -102,15 +102,15 @@ class ExternalBucket[K, V, C](
     fileBuffers.deleteEmptyFiles()
 
     return new Iterator[(K, C)] {
-      var buffersRead = 0
-      val buffersToRead = fileBuffers.numBuffers
+      var bucketToRead = 0
+      val buckets = fileBuffers.numBuffers
 
       /** Merge tuples in the next partition file using inMemBucket. */
       def loadNextPartition(): Iterator[(K, C)] = {
         inMemBucket.clear()
-        val bufferIter = fileBuffers.getBufferedIterator(0).asInstanceOf[Iterator[(K, C)]]
+        val bufferIter = fileBuffers.getBufferedIterator(bucketToRead).asInstanceOf[Iterator[(K, C)]]
         val bucket = {
-          if (fileBuffers.fitsInMemory(0, maxBytes)) {
+          if (fileBuffers.fitsInMemory(bucketToRead, maxBytes)) {
             inMemBucket
           } else {
             val partitions = (numPartitions * 1.5).toInt
@@ -121,15 +121,15 @@ class ExternalBucket[K, V, C](
           val (k, c) = bufferIter.next()
           bucket.merge(k, c)
         }
-        buffersRead += 1
-        /** Delete file, since contents are bufferd in memory. */
-        fileBuffers.delete(0)
+        /** If we've read all buckets from disk, delete all files */
+        bucketToRead += 1
+        if (bucketToRead == buckets) fileBuffers.clear()
         bucket.bucketIterator
       }
       
       var bucketIter = loadNextPartition()
       
-      def hasNext() = bucketIter.hasNext || buffersRead < buffersToRead
+      def hasNext() = bucketIter.hasNext || bucketToRead < buckets
       
       def next(): (K, C) = {
         if (!bucketIter.hasNext) {

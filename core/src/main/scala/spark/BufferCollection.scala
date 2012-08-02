@@ -69,7 +69,7 @@ class BufferCollection[T: ClassManifest](
     if (!fileBuffer.buffer.isEmpty) {
       try {     
         _avgObjSize = (SizeEstimator.estimate(fileBuffer.buffer.toArray)
-                       /fileBuffer.buffer.size + _avgObjSize) / 2
+          /fileBuffer.buffer.size + _avgObjSize) / 2
         val out = fileBuffer.serializeStream
         out.writeObject(fileBuffer.buffer)
         fileBuffer.buffer.clear()
@@ -175,6 +175,8 @@ class BufferCollection[T: ClassManifest](
       }
     }
   }
+
+  def clear() = fileBuffers.clear()
   
   def addBuffer(index: Int = numBuffers) {
     val newBuffer = new FileBuffer(0L, 0, new ArrayBuffer[Any], 

@@ -22,11 +22,11 @@ object ExternalSorter {
    *
    * @tparam K type of keys to be sorted by
    * @tparam V type of value
-   * @param dataInMem holds tuples already iterated through in memory (size > maxBytes).
-   * @param inputIter iterator for remaining tuples to be sorted.
-   * @param initialTupSize average tuple size for tuples in the dataInMem buffer (ex. in SortedRDD)
+   * @param dataInMem holds tuples already buffered in memory (size > maxBytes).
+   * @param inputIter iterator for remaining tuples to be read.
+   * @param initialTupSize average tuple size for tuples in the dataInMem buffer.
    * @param maxBytes maximum in-memory bytes to use for sorting.
-   * @param ascending boolean to specify sort order.
+   * @param ascending true if ascending sort order.
    *
    * @return Iterator for (K, V) tuples, sorted by K.
    */
@@ -225,8 +225,7 @@ object ExternalSorter {
     
   
   /**
-   * External bucketsort implementation, using Scala's quicksort to sort each bucket partition.
-   * If a partition file doesn't fit in memory, recursive bucketSort is used.
+   * External bucketsort implementation, using Scala's quicksort to sort each bucket.
    *
    * @param dataInMem a buffer that holds tuples already iterated through in memory (size > maxBytes).
    * @param inputIter iterator for remaining tuples to be sorted.
@@ -243,16 +242,16 @@ object ExternalSorter {
       maxBytes: Long, 
       ascending: Boolean): Iterator[(K, V)] = {
     
-    val rangePartitions = ExternalSorter.getNumBuckets
-    val bufferSize = maxBytes/rangePartitions
+    val numBuckets = ExternalSorter.getNumBuckets
+    val bufferSize = maxBytes/numBuckets
     val op = "BucketSort"
     val fileBuffers = 
-      new BufferCollection[(K, V)](op, rangePartitions, bufferSize, initialTupSize)
+      new BufferCollection[(K, V)](op, numBuckets, bufferSize, initialTupSize)
     
     /** Sample the dataInMem to get range bounds. */
     val rangeBounds: Array[K] = {
       val dataSize = dataInMem.length
-      val maxSampleSize = rangePartitions * 10.0
+      val maxSampleSize = numBuckets * 10.0
       val frac = math.min(maxSampleSize / math.max(dataSize, 1), 1.0)
       var sample = {
         val rg = new Random(1)
@@ -264,61 +263,60 @@ object ExternalSorter {
       if (sample.length == 0) {
         Array()
       } else {
-        val bounds = new Array[K](rangePartitions)
-        for (i <- 0 until rangePartitions) {
-          bounds(i) = sample(i * sample.length / rangePartitions)
+        val bounds = new Array[K](numBuckets)
+        for (i <- 0 until numBuckets) {
+          bounds(i) = sample(i * sample.length / numBuckets)
         }
         bounds
       }
     }
     
-    def getPartition(key: K): Int = {
-      var partition = 0
-      while (partition < rangeBounds.length - 1 && key > rangeBounds(partition)) {
-        partition += 1
+    def getBucket(key: K): Int = {
+      var bucket = 0
+      while (bucket < rangeBounds.length - 1 && key > rangeBounds(bucket)) {
+        bucket += 1
       }
       if (ascending) {
-        partition
+        bucket
       } else {
-        rangeBounds.length - 1 - partition
+        rangeBounds.length - 1 - bucket
       }
     }
   
     /** Write in-memory KVs to disk. */
     for (kv <- dataInMem) {
-      val part = getPartition(kv._1)
-      fileBuffers.write(kv, part)
+      val bucket = getBucket(kv._1)
+      fileBuffers.write(kv, bucket)
     }
     dataInMem.clear()
 
     /** Write remaining KVs to disk. */
     while (inputIter.hasNext) {
       val outputKV = inputIter.next()
-      val part = getPartition(outputKV._1)
-      fileBuffers.write(outputKV, part)
+      val bucket = getBucket(outputKV._1)
+      fileBuffers.write(outputKV, bucket)
     }
 
     /** Must force everything to disk before iterating. */
-    for (i <- 0 until fileBuffers.numBuffers) fileBuffers.forceToDisk(i)
+    for (i <- 0 until numBuckets) fileBuffers.forceToDisk(i)
 
-    /** Delete partition files that haven't been written to */
+    /** Delete bucket files that haven't been written to */
     fileBuffers.deleteEmptyFiles()
     
     return new Iterator[(K, V)] {
-      var buffersRead = 0
-      val buffersToRead = fileBuffers.numBuffers
+      var bucketToRead = 0
+      val buckets = fileBuffers.numBuffers
 
-      /** Load a partition into memory and return sorted iterator.
-       * Recursively call bucketSort() if partition doesn't fit in memory.
+      /** Load a bucket into memory and return sorted iterator.
+       * Recursively call bucketSort() if bucket contents don't fit in memory.
        */
       def loadNextIter(): Iterator[(K, V)] = {
-        buffersRead += 1
         val toRet = {
-          if (fileBuffers.fitsInMemory(0, maxBytes)) {
-            val block = fileBuffers.getBufferedIterator(0).toArray
+          if (fileBuffers.fitsInMemory(bucketToRead, maxBytes)) {
+            val block = fileBuffers.getBufferedIterator(bucketToRead).toArray
             block.sortWith((x, y) => if (ascending) x._1 < y._1 else x._1 > y._1).iterator
           } else {
-            val bufferIter = fileBuffers.getBufferedIterator(0)
+            val bufferIter = fileBuffers.getBufferedIterator(bucketToRead)
             var size = 0L
             while(bufferIter.hasNext && size < maxBytes) {
               dataInMem.append(bufferIter.next())
@@ -327,15 +325,16 @@ object ExternalSorter {
             bucketSort(dataInMem, bufferIter, fileBuffers.avgObjSize, maxBytes, ascending)
           }
         }
-        /** Delete file, since we've bufferd its KVs in memory. */
-        fileBuffers.delete(0)
+        /** If we've read all buckets from disk, delete all files */
+        bucketToRead += 1
+        if (bucketToRead == buckets) fileBuffers.clear()
         return toRet
       }
 
 
       var inputIter = loadNextIter()
 
-      def hasNext() = inputIter.hasNext || buffersRead < buffersToRead
+      def hasNext() = inputIter.hasNext || bucketToRead < buckets
 
       def next(): (K, V) = {
         if (!inputIter.hasNext) {

@@ -121,7 +121,7 @@ class ShuffleMapTask(
       new InternalBucket(aggregator, dep.createMap()))
 
     var numInserted = 0
-    var avgObjSize = 0L
+    var avgTupleSize = 0L
     
     while(pairRDDIter.hasNext) {
       val (k, v) = pairRDDIter.next()
@@ -131,18 +131,18 @@ class ShuffleMapTask(
       numInserted += 1
       if (numInserted == 5000) {
         bytesUsed = SizeEstimator.estimate(buckets)
-        avgObjSize = bytesUsed/5000
+        avgTupleSize = bytesUsed/5000
       }
       if (!usingExternalHash && bytesUsed > maxBytes) {
         buckets = buckets.map(bucket =>
           new ExternalBucket(
             bucket.asInstanceOf[InternalBucket[Any, Any, Any]],
             numInserted,
-            avgObjSize,
+            avgTupleSize,
             bucketSize))
         usingExternalHash = true
       } else {
-        bytesUsed += avgObjSize
+        bytesUsed += avgTupleSize
       }
     }
 

@@ -13,7 +13,7 @@ import java.util.{HashMap => JHashMap, Map => JMap}
  */
 trait ShuffleBucket[K, V, C] {
   def put(key: K, value: V)
-  def merge(key: K, value: C)
+  def merge(key: K, combiner: C)
   def clear()
   def bucketIterator(): Iterator[(K, C)]
 }
