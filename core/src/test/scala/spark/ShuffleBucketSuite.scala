@@ -20,67 +20,67 @@ class ShuffleBucketSuite extends FunSuite {
   val testClass = classOf[TestClass]
 
   test("Implicit conversion for Object2BooleanOpenHashMap") {
-    var createMap = ShuffleBucket.makeMap(testClass, classOf[Boolean])
-    assert(createMap().isInstanceOf[Object2BooleanOpenHashMap[Any]])
+    val createMapFromScalaClass = ShuffleBucket.makeMap(testClass, classOf[Boolean])
+    assert(createMapFromScalaClass().isInstanceOf[Object2BooleanOpenHashMap[_]])
 
-    createMap = ShuffleBucket.makeMap(testClass, classOf[java.lang.Boolean])
-    assert(createMap().isInstanceOf[Object2BooleanOpenHashMap[Any]])
+    val createMapFromJavaClass = ShuffleBucket.makeMap(testClass, classOf[java.lang.Boolean])
+    assert(createMapFromJavaClass().isInstanceOf[Object2BooleanOpenHashMap[_]])
   }
 
   test("Implicit conversion for Object2ByteOpenHashMap") {
-    var createMap = ShuffleBucket.makeMap(testClass, classOf[Byte])
-    assert(createMap().isInstanceOf[Object2ByteOpenHashMap[Any]])
+    val createMapFromScalaClass = ShuffleBucket.makeMap(testClass, classOf[Byte])
+    assert(createMapFromScalaClass().isInstanceOf[Object2ByteOpenHashMap[_]])
 
-    createMap = ShuffleBucket.makeMap(testClass, classOf[java.lang.Byte])
-    assert(createMap().isInstanceOf[Object2ByteOpenHashMap[Any]])
+    val createMapFromJavaClass = ShuffleBucket.makeMap(testClass, classOf[java.lang.Byte])
+    assert(createMapFromJavaClass().isInstanceOf[Object2ByteOpenHashMap[_]])
   }
 
   test("Implicit conversion for Object2CharOpenHashMap") {
-    var createMap = ShuffleBucket.makeMap(testClass, classOf[Char])
-    assert(createMap().isInstanceOf[Object2CharOpenHashMap[Any]])
+    val createMapFromScalaClass = ShuffleBucket.makeMap(testClass, classOf[Char])
+    assert(createMapFromScalaClass().isInstanceOf[Object2CharOpenHashMap[_]])
 
-    createMap = ShuffleBucket.makeMap(testClass, classOf[java.lang.Character])
-    assert(createMap().isInstanceOf[Object2CharOpenHashMap[Any]])
+    val createMapFromJavaClass = ShuffleBucket.makeMap(testClass, classOf[java.lang.Character])
+    assert(createMapFromJavaClass().isInstanceOf[Object2CharOpenHashMap[_]])
   }
 
   test("Implicit conversion for Object2IntOpenHashMap") {
-    var createMap = ShuffleBucket.makeMap(testClass, classOf[Int])
-    assert(createMap().isInstanceOf[Object2IntOpenHashMap[Any]])
+    val createMapFromScalaClass = ShuffleBucket.makeMap(testClass, classOf[Int])
+    assert(createMapFromScalaClass().isInstanceOf[Object2IntOpenHashMap[_]])
 
-    createMap = ShuffleBucket.makeMap(testClass, classOf[java.lang.Integer])
-    assert(createMap().isInstanceOf[Object2IntOpenHashMap[Any]])
+    val createMapFromJavaClass = ShuffleBucket.makeMap(testClass, classOf[java.lang.Integer])
+    assert(createMapFromJavaClass().isInstanceOf[Object2IntOpenHashMap[_]])
   }
 
   test("Implicit conversion for Object2DoubleOpenHashMap") {
-    var createMap = ShuffleBucket.makeMap(testClass, classOf[Double])
-    assert(createMap().isInstanceOf[Object2DoubleOpenHashMap[Any]])
+    val createMapFromScalaClass = ShuffleBucket.makeMap(testClass, classOf[Double])
+    assert(createMapFromScalaClass().isInstanceOf[Object2DoubleOpenHashMap[_]])
 
-    createMap = ShuffleBucket.makeMap(testClass, classOf[java.lang.Double])
-    assert(createMap().isInstanceOf[Object2DoubleOpenHashMap[Any]])
+    val createMapFromJavaClass = ShuffleBucket.makeMap(testClass, classOf[java.lang.Double])
+    assert(createMapFromJavaClass().isInstanceOf[Object2DoubleOpenHashMap[_]])
   }
 
   test("Implicit conversion for Object2FloatOpenHashMap") {
-    var createMap = ShuffleBucket.makeMap(testClass, classOf[Float])
-    assert(createMap().isInstanceOf[Object2FloatOpenHashMap[Any]])
+    val createMapFromScalaClass = ShuffleBucket.makeMap(testClass, classOf[Float])
+    assert(createMapFromScalaClass().isInstanceOf[Object2FloatOpenHashMap[_]])
 
-    createMap = ShuffleBucket.makeMap(testClass, classOf[java.lang.Float])
-    assert(createMap().isInstanceOf[Object2FloatOpenHashMap[Any]])
+    val createMapFromJavaClass = ShuffleBucket.makeMap(testClass, classOf[java.lang.Float])
+    assert(createMapFromJavaClass().isInstanceOf[Object2FloatOpenHashMap[_]])
   }
 
   test("Implicit conversion for Object2LongOpenHashMap") {
-    var createMap = ShuffleBucket.makeMap(testClass, classOf[Long])
-    assert(createMap().isInstanceOf[Object2LongOpenHashMap[Any]])
+    val createMapFromScalaClass = ShuffleBucket.makeMap(testClass, classOf[Long])
+    assert(createMapFromScalaClass().isInstanceOf[Object2LongOpenHashMap[_]])
 
-    createMap = ShuffleBucket.makeMap(testClass, classOf[java.lang.Long])
-    assert(createMap().isInstanceOf[Object2LongOpenHashMap[Any]])
+    val createMapFromJavaClass = ShuffleBucket.makeMap(testClass, classOf[java.lang.Long])
+    assert(createMapFromJavaClass().isInstanceOf[Object2LongOpenHashMap[_]])
   }
 
   test("Implicit conversion for Object2ShortOpenHashMap") {
-    var createMap = ShuffleBucket.makeMap(testClass, classOf[Short])
-    assert(createMap().isInstanceOf[Object2ShortOpenHashMap[Any]])
+    val createMapFromScalaClass = ShuffleBucket.makeMap(testClass, classOf[Short])
+    assert(createMapFromScalaClass().isInstanceOf[Object2ShortOpenHashMap[_]])
 
-    createMap = ShuffleBucket.makeMap(testClass, classOf[java.lang.Short])
-    assert(createMap().isInstanceOf[Object2ShortOpenHashMap[Any]])
+    val createMapFromJavaClass = ShuffleBucket.makeMap(testClass, classOf[java.lang.Short])
+    assert(createMapFromJavaClass().isInstanceOf[Object2ShortOpenHashMap[_]])
   }
 
   test("Implicit conversion for Object2ObjectOpenHashMap") {
@@ -90,6 +90,6 @@ class ShuffleBucketSuite extends FunSuite {
 
   test("Default JavaMap instantiation") {
     val createMap = ShuffleBucket.makeMap(classOf[Int], classOf[Int])
-    assert(createMap().isInstanceOf[JHashMap[Any, Any]])
+    assert(createMap().isInstanceOf[JHashMap[_, _]])
   }
 }

@@ -26,7 +26,7 @@ class ShuffledRDD[K: ClassManifest, V, C: ClassManifest](
   
   val kClass = implicitly[ClassManifest[K]].erasure.asInstanceOf[Class[K]]
   val cClass = implicitly[ClassManifest[C]].erasure.asInstanceOf[Class[C]]
-  val createMap: () => JMap[Any, Any] = ShuffleBucket.makeMap(kClass, cClass)
+  val createMap: () => JMap[K, C] = ShuffleBucket.makeMap(kClass, cClass)
   val dep = new ShuffleDependency(context.newShuffleId, parent, aggregator, part, createMap)
   override val dependencies = List(dep)
 
@@ -34,24 +34,35 @@ class ShuffledRDD[K: ClassManifest, V, C: ClassManifest](
     val maxBytes = ShuffleBucket.getMaxHashBytes
     var combiners: ShuffleBucket[K, V, C] = new InternalBucket(aggregator, createMap())
     var bytesUsed = 0L
-    var pairsMerged = 0
+    var pairsMerged = 0L
     var avgPairSize = 0L
+    var usingExternalHash = false
 
     def mergePair(k: K, c: C) {
       combiners.merge(k, c)
-      pairsMerged += 1
-      if (pairsMerged == 1000) {
-        bytesUsed = SizeEstimator.estimate(combiners)
-        avgPairSize = bytesUsed/1000
-      }
-      if (bytesUsed > maxBytes) {
-        combiners = new ExternalBucket(
-          combiners.asInstanceOf[InternalBucket[K, V, C]], 
-          pairsMerged, 
-          avgPairSize, 
-          maxBytes)
-      } else {
-        bytesUsed += avgPairSize
+      pairsMerged += 1L
+      if (!usingExternalHash) {
+        if (pairsMerged % 100000 == 0) {
+          bytesUsed = SizeEstimator.estimate(combiners)
+          avgPairSize = bytesUsed/pairsMerged
+        }
+        if (bytesUsed > maxBytes) {
+          bytesUsed = SizeEstimator.estimate(combiners)
+          /* Check to make sure we've gone over */
+          if (bytesUsed > maxBytes) {
+            val newBucket = new ExternalBucket(
+              combiners.asInstanceOf[InternalBucket[K, V, C]], 
+              pairsMerged, 
+              avgPairSize, 
+              maxBytes)
+              usingExternalHash == true
+            combiners = newBucket
+          } else {
+            avgPairSize = bytesUsed/pairsMerged
+          }
+        } else {
+          bytesUsed += avgPairSize
+        }
       }
     }
 

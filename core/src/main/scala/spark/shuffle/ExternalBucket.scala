@@ -12,41 +12,37 @@ import spark.SizeEstimator
  * @param numInserted the number of KVs (= number of put() or merge() calls)
  *        on the InternalBucket passed above.
  * @param avgObjSize the average size of each KV passed to a put() or merge() call.
- * @param avgCombinerSize average size of each combiner in the InternalBucket passed above.
  * @param numPartitions number of partition files to use for external hashing.
  * @param maxBytes maximum in-memory bytes to use for hashing
  */
 class ExternalBucket[K, V, C](
-    private val inMemBucket: InternalBucket[K, V, C], 
-    private var numInserted: Int,
+    private val inMemBucket: InternalBucket[K, V, C],
+    private var numInserted: Long,
     private var avgObjSize: Long,
-    private val avgCombinerSize: Long,
     private val numPartitions: Int,
     private val maxBytes: Long)
   extends ShuffleBucket[K, V, C] {
 
-  private val bufferSize = maxBytes/numPartitions
-  private val fileBuffers = new BufferCollection[(K, Any)](
-    "externalBucket", 
-    numPartitions, 
-    bufferSize, 
-    avgCombinerSize)
+  private val blockBufferSize = maxBytes/numPartitions
+  private val fileBuffers = new BufferCollection[(K, C)](
+    "externalBucket",
+    numPartitions,
+    blockBufferSize)
   private var bucketSize = 0L
 
   /** Write out entries passed from InMemBucket. */
   if (numInserted > 0) clearBucketToDisk()
-  
+
   /** Constructor called in ShuffledRDD and ShuffleMapTask. */
   def this(
-    inMemBucket: InternalBucket[K, V, C], 
-    numInserted: Int, 
-    avgObjSize: Long, 
+    inMemBucket: InternalBucket[K, V, C],
+    numInserted: Long,
+    avgObjSize: Long,
     maxBytes: Long) = {
     this(
       inMemBucket,
       numInserted,
       avgObjSize,
-      maxBytes/inMemBucket.numCombiners,
       ShuffleBucket.getNumPartitions,
       maxBytes)
   }
@@ -55,12 +51,12 @@ class ExternalBucket[K, V, C](
     inMemBucket.put(key, value)
     updateBucket()
   }
-  
+
   def merge(key: K, newC: C) {
     inMemBucket.merge(key, newC)
     updateBucket()
   }
-  
+
   /**
    * Write out entries in InMemBucket and update the avgObjSize.
    * Avg combiner size is tracked as fileBuffers.avgObjSize.
@@ -71,7 +67,7 @@ class ExternalBucket[K, V, C](
     avgObjSize = (avgObjSize + maxBytes/numInserted)/2
     inMem.foreach(kc => writeToPartition(kc._1, kc._2))
     inMemBucket.clear()
-    numInserted = 0
+    numInserted = 0L
     bucketSize = 0L
   }
 
@@ -82,7 +78,7 @@ class ExternalBucket[K, V, C](
     if (bucketSize > maxBytes) clearBucketToDisk()
   }
 
-  /** Write to FileBuffer, using hashcode as index. */
+  /** Write to a FileBuffer, using hashcode as index. */
   private def writeToPartition(key: K, toWrite: C) {
     var partitionFileNum = key.hashCode % numPartitions
     if (partitionFileNum < 0) {
@@ -95,26 +91,26 @@ class ExternalBucket[K, V, C](
   def bucketIterator(): Iterator[(K, C)] = {
     /** Force all tuples in memory (in hashMap, buffers) to disk. */
     if (numInserted > 0) clearBucketToDisk()
-    
-    for (i <- 0 until fileBuffers.numBuffers) { fileBuffers.forceToDisk(i) }
+
+    for (i <- 0 until fileBuffers.numFiles) { fileBuffers.forceToDisk(i) }
 
     /** Delete files that haven't been written to */
     fileBuffers.deleteEmptyFiles()
 
     return new Iterator[(K, C)] {
       var bucketToRead = 0
-      val buckets = fileBuffers.numBuffers
+      val buckets = fileBuffers.numFiles
 
       /** Merge tuples in the next partition file using inMemBucket. */
       def loadNextPartition(): Iterator[(K, C)] = {
         inMemBucket.clear()
-        val bufferIter = fileBuffers.getBufferedIterator(bucketToRead).asInstanceOf[Iterator[(K, C)]]
+        val bufferIter = fileBuffers.getBufferedIterator(bucketToRead)
         val bucket = {
           if (fileBuffers.fitsInMemory(bucketToRead, maxBytes)) {
             inMemBucket
           } else {
-            val partitions = (numPartitions * 1.5).toInt
-            new ExternalBucket(inMemBucket, 0, avgObjSize, fileBuffers.avgObjSize, partitions, maxBytes)
+            val partitions = numPartitions * 2
+            new ExternalBucket(inMemBucket, 0, avgObjSize, partitions, maxBytes)
           }
         }
         while (bufferIter.hasNext) {
@@ -126,11 +122,11 @@ class ExternalBucket[K, V, C](
         if (bucketToRead == buckets) fileBuffers.clear()
         bucket.bucketIterator
       }
-      
+
       var bucketIter = loadNextPartition()
-      
+
       def hasNext() = bucketIter.hasNext || bucketToRead < buckets
-      
+
       def next(): (K, C) = {
         if (!bucketIter.hasNext) {
           bucketIter = loadNextPartition()

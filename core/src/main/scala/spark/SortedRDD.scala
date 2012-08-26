@@ -13,7 +13,7 @@ class SortedRDD[K <% Ordered[K]: ClassManifest, V](prev: RDD[(K, V)], ascending:
     val maxBytes = ExternalSorter.getMaxSortBytes
     var inputSize = 0L
     var avgTupleSize = 0L
-    var numKVs = 0
+    var numKVs = 0L
     val input = new ArrayBuffer[(K, V)]
     val inputIter = prev.iterator(split)
 
@@ -22,9 +22,9 @@ class SortedRDD[K <% Ordered[K]: ClassManifest, V](prev: RDD[(K, V)], ascending:
       if (inputIter.hasNext) {
         input.append(inputIter.next())
         numKVs += 1
-        if (numKVs == 5000) {
-          inputSize = SizeEstimator.estimate(input.toArray)
-          avgTupleSize =  inputSize/5000
+        if (numKVs % 500000 == 0) {
+          inputSize = SizeEstimator.estimate(input)
+          avgTupleSize =  inputSize / numKVs
         } else {
           inputSize += avgTupleSize
         } 
@@ -36,9 +36,9 @@ class SortedRDD[K <% Ordered[K]: ClassManifest, V](prev: RDD[(K, V)], ascending:
     // Start external sorting.
     val keyClass = implicitly[ClassManifest[K]].erasure
     if (keyClass.isPrimitive) {
-      return ExternalSorter.bucketSort(input, inputIter, avgTupleSize, maxBytes, ascending)
+      return ExternalSorter.bucketSort(input, inputIter, maxBytes, ascending)
     } else {
-      return ExternalSorter.mergeSort(input, inputIter, avgTupleSize, maxBytes, ascending)
+      return ExternalSorter.mergeSort(input, inputIter, maxBytes, ascending)
     }
   }
 }

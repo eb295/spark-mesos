@@ -22,11 +22,11 @@ class InternalBucketSuite extends FunSuite {
   def mergeCombiners(b1: ArrayBuffer[Int], b2: ArrayBuffer[Int]) = b1 ++= b2
 
   val aggregator = new Aggregator[Int, Int, ArrayBuffer[Int]](createCombiner, mergeValue, mergeCombiners)
-  val createMap: () => JMap[Any, Any] = () => new JHashMap[Any, Any]
+  val createMap = () => new JHashMap[Int, ArrayBuffer[Int]]
   val maxBytes = ShuffleBucket.getMaxHashBytes
 
   test("Combine (key, value) using put and iterate through combiners") {
-    val bucket = new InternalBucket[Int, Int, ArrayBuffer[Int]](aggregator, createMap(), maxBytes)
+    val bucket = new InternalBucket[Int, Int, ArrayBuffer[Int]](aggregator, createMap())
     val pairs = Array((1, 1), (1, 2), (2, 1), (1, 3))
     for (kvPair <- pairs) { bucket.put(kvPair._1, kvPair._2) }
     val combined = bucket.bucketIterator().toArray
@@ -34,7 +34,7 @@ class InternalBucketSuite extends FunSuite {
   }
 
   test("Combine (key, combiner) using merge and iterate through combiners") {
-    val bucket = new InternalBucket[Int, Int, ArrayBuffer[Int]](aggregator, createMap(), maxBytes)
+    val bucket = new InternalBucket[Int, Int, ArrayBuffer[Int]](aggregator, createMap())
     val combiners = Array((1, ArrayBuffer(1, 2, 3)), (1, ArrayBuffer(4, 5)), (2, ArrayBuffer(6)))
     for (combinerPair <- combiners) { bucket.merge(combinerPair._1, combinerPair._2) }
     val merged = bucket.bucketIterator().toArray
@@ -42,7 +42,7 @@ class InternalBucketSuite extends FunSuite {
   }
 
   test("Negative hashcodes") {
-    val bucket = new InternalBucket[Int, Int, ArrayBuffer[Int]](aggregator, createMap(), maxBytes)
+    val bucket = new InternalBucket[Int, Int, ArrayBuffer[Int]](aggregator, createMap())
     val pairs = Array((-1, 1), (1, 2), (2, 1), (-1, 3))
     for (kvPair <- pairs) { bucket.put(kvPair._1, kvPair._2) }
     val combined = bucket.bucketIterator().toArray
@@ -50,7 +50,7 @@ class InternalBucketSuite extends FunSuite {
   }
 
   test("Empty input") {
-    val bucket = new InternalBucket[Int, Int, ArrayBuffer[Int]](aggregator, createMap(), maxBytes)
+    val bucket = new InternalBucket[Int, Int, ArrayBuffer[Int]](aggregator, createMap())
     assert(bucket.bucketIterator.size === 0)
   }
 }

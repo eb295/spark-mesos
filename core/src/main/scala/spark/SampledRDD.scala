@@ -29,17 +29,37 @@ class SampledRDD[T: ClassManifest](
   override def compute(splitIn: Split) = {
     val split = splitIn.asInstanceOf[SampledRDDSplit]
     val rg = new Random(split.seed)
-    // Sampling with replacement (TODO: use reservoir sampling to make this more efficient?)
     if (withReplacement) {
-      val oldData = prev.iterator(split.prev).toArray
-      val sampleSize = (oldData.size * frac).ceil.toInt
-      val sampledData = { 
-        // all of oldData's indices are candidates, even if sampleSize < oldData.size
-        for (i <- 1 to sampleSize)
-          yield oldData(rg.nextInt(oldData.size)) 
+      // Reservoir Sampling.
+      // TODO: Avoid the extra pass through partition data that's needed to
+      // determine the number of elements in this partition.
+      var dataSize = 0L
+      val countIter = prev.iterator(split.prev)
+      while (countIter.hasNext) { dataSize += 1L }
+      val dataIter = prev.iterator(split.prev)
+      val sampleSize = (dataSize * frac).ceil.toInt
+      val sampleReservoir = new Array[T](sampleSize)
+      var indexToReplace = 0
+      var i = 0
+      while (dataIter.hasNext) {
+        if (i < dataSize) {
+          // Init reservoir, load sampleSize elements into memory.
+          sampleReservoir(i) = dataIter.next()
+        } else {
+          // Keep the ith element with probability dataSize/(dataSize + i).
+          indexToReplace = rg.nextInt(i)
+          if (indexToReplace < sampleSize) {
+            // If we keep i, replace a random element in the reservoir.
+            sampleReservoir(indexToReplace) = dataIter.next()
+          } else {
+            dataIter.next()
+          }
+        }
+        i += 1
       }
-      sampledData.iterator
+      sampleReservoir.iterator
     } else { // Sampling without replacement
+
       prev.iterator(split.prev).filter(x => (rg.nextDouble <= frac))
     }
   }

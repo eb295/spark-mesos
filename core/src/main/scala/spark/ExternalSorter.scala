@@ -24,7 +24,6 @@ object ExternalSorter {
    * @tparam V type of value
    * @param dataInMem holds tuples already buffered in memory (size > maxBytes).
    * @param inputIter iterator for remaining tuples to be read.
-   * @param initialTupSize average tuple size for tuples in the dataInMem buffer.
    * @param maxBytes maximum in-memory bytes to use for sorting.
    * @param ascending true if ascending sort order.
    *
@@ -33,23 +32,21 @@ object ExternalSorter {
   def mergeSort[K <% Ordered[K], V](
       dataInMem: ArrayBuffer[(K, V)], 
       inputIter: Iterator[(K, V)], 
-      initialTupSize: Long,
       maxBytes: Long,
       ascending: Boolean): Iterator[(K, V)] = {
     
     /** Max fan-in for each merge run */
     val fanIn = ExternalSorter.getFanIn
-    val bufferSize = maxBytes/fanIn
+    val bufferBlockSize = maxBytes/fanIn
     val op = "ReplacementSelection-MergeSort"
   
     /**
-     * Replacement-selection to generate runs in pass 0. Uses maxBytes + bufferSize memory.
+     * Replacement-selection to generate runs in pass 0. Uses maxBytes + bufferBlockSize memory.
      *
      * @return BufferCollection of buffers/files that have been written to.
      */
     def generateRuns(): BufferCollection[((K, Int), V)] = {
-      /** 16L min. overhead for ((K, Int), V) tuple: tuple ref(4) + Int(4) + min object size(8) */
-      val fileBuffers = new BufferCollection[((K, Int), V)](op, 1, bufferSize, initialTupSize + 16L)
+      val fileBuffers = new BufferCollection[((K, Int), V)](op, 1, bufferBlockSize)
       var currentSet = new PriorityQueue[((K, Int), V)]()(KeyRunOrdering)
       currentSet ++= dataInMem.map(KV => ((KV._1, 0), KV._2))
       var currentRun = 0
@@ -60,7 +57,7 @@ object ExternalSorter {
         if (outputRun != currentRun) {
           fileBuffers.forceToDisk(currentRun)
           currentRun += 1
-          fileBuffers.addBuffer()
+          fileBuffers.addFile()
         }
         fileBuffers.write(output, currentRun)
       }
@@ -71,7 +68,7 @@ object ExternalSorter {
        */
       while (inputIter.hasNext) {
         for ((key, value) <- inputIter) {
-          var output = currentSet.dequeue
+          val output = currentSet.dequeue
           val (outputKey, outputRun) = output._1 
           writeToRun(output)
 
@@ -101,9 +98,9 @@ object ExternalSorter {
       fileBuffers
     }
   
-    /** Merges files written to in generateRuns(). Number of files to merge = fileBuffers.numBuffers. */
+    /** Merges files written to in generateRuns(). Number of files to merge = fileBuffers.numFiles. */
     def mergeRuns(fileBuffers: BufferCollection[((K, Int), V)]): Iterator[((K, Int), V)] = {
-      var numMergePasses = math.ceil(math.log(fileBuffers.numBuffers)/math.log(fanIn))
+      var numMergePasses = (math.log(fileBuffers.numFiles)/math.log(fanIn)).ceil.toInt
       val mergeQueue = new PriorityQueue[((K, Int), V)]()(KeyOrdering)
 
       /**
@@ -154,14 +151,14 @@ object ExternalSorter {
       /** Each iteration is a pass. */
       while (numMergePasses > 0) {
         /** Total files to merge for current pass. */
-        var totalToMerge = fileBuffers.numBuffers
+        var totalToMerge = fileBuffers.numFiles
         /** Files to merge for first merge run */
         var numToMerge = math.min(totalToMerge, fanIn)
         /** Index of first file to merge. */
         var start = 0
         /** Add one temp file to hold the first merge run output. */
-        var currentOutputRun = fileBuffers.numBuffers
-        fileBuffers.addBuffer()
+        var currentOutputRun = fileBuffers.numFiles
+        fileBuffers.addFile()
         var firstRun = true
 
         /** Each iteration is a merge run. */
@@ -229,7 +226,6 @@ object ExternalSorter {
    *
    * @param dataInMem a buffer that holds tuples already iterated through in memory (size > maxBytes).
    * @param inputIter iterator for remaining tuples to be sorted.
-   * @param initialTupSize average tuple size of tuples in dataInMem buffer.
    * @param maxBytes maximum in-memory bytes to use for sorting.
    * @param ascending a boolean to specify sort order.
    *
@@ -238,15 +234,14 @@ object ExternalSorter {
   def bucketSort[K <% Ordered[K]: ClassManifest, V](
       dataInMem: ArrayBuffer[(K, V)], 
       inputIter: Iterator[(K, V)],
-      initialTupSize: Long,
       maxBytes: Long, 
       ascending: Boolean): Iterator[(K, V)] = {
     
     val numBuckets = ExternalSorter.getNumBuckets
-    val bufferSize = maxBytes/numBuckets
+    val bufferBlockSize = maxBytes/numBuckets
     val op = "BucketSort"
     val fileBuffers = 
-      new BufferCollection[(K, V)](op, numBuckets, bufferSize, initialTupSize)
+      new BufferCollection[(K, V)](op, numBuckets, bufferBlockSize)
     
     /** Sample the dataInMem to get range bounds. */
     val rangeBounds: Array[K] = {
@@ -305,7 +300,7 @@ object ExternalSorter {
     
     return new Iterator[(K, V)] {
       var bucketToRead = 0
-      val buckets = fileBuffers.numBuffers
+      val buckets = fileBuffers.numFiles
 
       /** Load a bucket into memory and return sorted iterator.
        * Recursively call bucketSort() if bucket contents don't fit in memory.
@@ -313,16 +308,15 @@ object ExternalSorter {
       def loadNextIter(): Iterator[(K, V)] = {
         val toRet = {
           if (fileBuffers.fitsInMemory(bucketToRead, maxBytes)) {
-            val block = fileBuffers.getBufferedIterator(bucketToRead).toArray
-            block.sortWith((x, y) => if (ascending) x._1 < y._1 else x._1 > y._1).iterator
+            val data = fileBuffers.getBufferedIterator(bucketToRead).toArray
+            data.sortWith((x, y) => if (ascending) x._1 < y._1 else x._1 > y._1).iterator
           } else {
             val bufferIter = fileBuffers.getBufferedIterator(bucketToRead)
             var size = 0L
             while(bufferIter.hasNext && size < maxBytes) {
               dataInMem.append(bufferIter.next())
-              size += fileBuffers.avgObjSize
             }
-            bucketSort(dataInMem, bufferIter, fileBuffers.avgObjSize, maxBytes, ascending)
+            bucketSort(dataInMem, bufferIter, maxBytes, ascending)
           }
         }
         /** If we've read all buckets from disk, delete all files */

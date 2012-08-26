@@ -1,7 +1,7 @@
 package spark.scheduler
 
 import java.io._
-import java.util.HashMap
+import java.util.{Map => JMap, HashMap => JHashMap}
 import java.util.zip.{GZIPInputStream, GZIPOutputStream}
 
 import scala.collection.mutable.ArrayBuffer
@@ -19,8 +19,8 @@ import spark.storage._
 
 
 object ShuffleMapTask {
-  val serializedInfoCache = new HashMap[Int, Array[Byte]]
-  val deserializedInfoCache = new HashMap[Int, (RDD[_], ShuffleDependency[_,_,_])]
+  val serializedInfoCache = new JHashMap[Int, Array[Byte]]
+  val deserializedInfoCache = new JHashMap[Int, (RDD[_], ShuffleDependency[_,_,_])]
 
   def serializeInfo(stageId: Int, rdd: RDD[_], dep: ShuffleDependency[_,_,_]): Array[Byte] = {
     synchronized {
@@ -118,9 +118,9 @@ class ShuffleMapTask(
     val bucketSize = maxBytes/numOutputSplits
     val pairRDDIter = rdd.iterator(split).asInstanceOf[Iterator[(Any, Any)]]
     var buckets: Array[ShuffleBucket[Any, Any, Any]]= Array.tabulate(numOutputSplits)(_=> 
-      new InternalBucket(aggregator, dep.createMap()))
+      new InternalBucket(aggregator, dep.createMap().asInstanceOf[JMap[Any, Any]]))
 
-    var numInserted = 0
+    var numInserted = 0L
     var avgTupleSize = 0L
     
     while(pairRDDIter.hasNext) {
@@ -129,31 +129,32 @@ class ShuffleMapTask(
       val bucket = buckets(bucketId)
       bucket.put(k, v)
       numInserted += 1
-      if (numInserted == 5000) {
-        bytesUsed = SizeEstimator.estimate(buckets)
-        avgTupleSize = bytesUsed/5000
-      }
-      if (!usingExternalHash && bytesUsed > maxBytes) {
-        buckets = buckets.map(bucket =>
-          new ExternalBucket(
-            bucket.asInstanceOf[InternalBucket[Any, Any, Any]],
-            numInserted,
-            avgTupleSize,
-            bucketSize))
-        usingExternalHash = true
+      if (!usingExternalHash) {
+        if (numInserted % 500000 == 0) {
+          bytesUsed = SizeEstimator.estimate(buckets)
+          avgTupleSize = bytesUsed/numInserted
+        }
+        if (bytesUsed > maxBytes) {
+          buckets = buckets.map(bucket =>
+            new ExternalBucket(
+              bucket.asInstanceOf[InternalBucket[Any, Any, Any]],
+              numInserted,
+              avgTupleSize,
+              bucketSize))
+          usingExternalHash = true
+        } 
       } else {
         bytesUsed += avgTupleSize
       }
     }
 
-    val ser = SparkEnv.get.serializer.newInstance()
     val blockManager = SparkEnv.get.blockManager
     for (i <- 0 until numOutputSplits) {
       val blockId = "shuffleid_" + dep.shuffleId + "_" + partition + "_" + i
       val iter = buckets(i).bucketIterator()
       val storageLvl = {
         if (usingExternalHash) {
-          StorageLevel.DISK_AND_MEMORY 
+          StorageLevel.DISK_ONLY 
         } else {
           StorageLevel.MEMORY_ONLY
         }

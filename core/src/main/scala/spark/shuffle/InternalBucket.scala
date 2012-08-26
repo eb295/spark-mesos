@@ -1,11 +1,12 @@
 package spark.shuffle
 
 import java.util.{Map => JMap}
+import scala.collection.JavaConversions._
 
 import spark.Aggregator
 
 /**
- * Wrapper for in-memory Hashmap.
+ * Encapsulates in-memory hash maps.
  * Initialized in ShuffledRDD and ShuffleMapTask.
  *
  * @param aggregator an Aggregator for K, V, C types passed.
@@ -14,7 +15,7 @@ import spark.Aggregator
  */
 class InternalBucket[K, V, C](
     private val aggregator: Aggregator[K, V, C], 
-    private val hashMap: JMap[Any, Any])
+    private val hashMap: JMap[K, C])
   extends ShuffleBucket[K, V, C] {
 
   def put(key: K, value: V) {
@@ -22,7 +23,7 @@ class InternalBucket[K, V, C](
     if (existing == null) {
       hashMap.put(key, aggregator.createCombiner(value))
     } else {
-      hashMap.put(key, aggregator.mergeValue(existing.asInstanceOf[C], value))
+      hashMap.put(key, aggregator.mergeValue(existing, value))
     }
   }
 
@@ -31,7 +32,7 @@ class InternalBucket[K, V, C](
     if (existing == null) {
       hashMap.put(key, c)
     } else {
-      hashMap.put(key, aggregator.mergeCombiners(c, existing.asInstanceOf[C]))
+      hashMap.put(key, aggregator.mergeCombiners(c, existing))
     }
   }
 
@@ -39,16 +40,5 @@ class InternalBucket[K, V, C](
 
   def numCombiners = hashMap.size
 
-  def bucketIterator(): Iterator[(K, C)] = {
-    return new Iterator[(K, C)] {
-      val iter = hashMap.entrySet.iterator
-
-      def hasNext() = iter.hasNext
-
-      def next() = {
-        val entry = iter.next()
-        (entry.getKey.asInstanceOf[K], entry.getValue.asInstanceOf[C])
-      }
-    }
-  }
+  def bucketIterator() = hashMap.iterator
 }

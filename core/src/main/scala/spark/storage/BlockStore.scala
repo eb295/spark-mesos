@@ -203,7 +203,7 @@ class DiskStore(blockManager: BlockManager, rootDirs: String)
     val channel = new RandomAccessFile(file, "r").getChannel()
     val bytes = ByteBuffer.allocate(length)
     bytes.put(channel.map(MapMode.READ_WRITE, 0, length))
-    return Some(bytes)  
+    return Some(bytes)
   }
 
   def getValues(blockId: String): Option[Iterator[Any]] = {

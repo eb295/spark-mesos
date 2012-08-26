@@ -7,6 +7,7 @@ import spark.shuffle.ShuffleFetcher
 import spark.shuffle.ShuffleManager
 import spark.storage.BlockManager
 import spark.storage.BlockManagerMaster
+import spark.BroadcastManager
 import spark.util.AkkaUtils
 
 class SparkEnv (

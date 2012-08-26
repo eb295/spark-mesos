@@ -34,32 +34,32 @@ object ShuffleBucket {
    * Returns a closure for instantiating a Java Map based on key and combiner classes.
    * Specialized Maps available for non-primitive keys.
    */ 
-  def makeMap(kClass: Class[_], cClass: Class[_]): () => JMap[Any, Any] = {
+  def makeMap[K, C](kClass: Class[K], cClass: Class[C]): () => JMap[K, C] = {
     if (kClass.isPrimitive) {
-      return () => new JHashMap[Any, Any]
+      return () => new JHashMap[K, C]
     } else {
       /** Match with Scala and Java primitives, otherwise default to Object2ObjectMap. */
       val createMap = cClass match {
         case c if (c == classOf[Boolean] || c == classOf[java.lang.Boolean]) => 
-          () => new Object2BooleanOpenHashMap[Any]
+          () => new Object2BooleanOpenHashMap[K]
         case c if (c == classOf[Byte] || c == classOf[java.lang.Byte]) => 
-          () => new Object2ByteOpenHashMap[Any]
+          () => new Object2ByteOpenHashMap[K]
         case c if (c == classOf[Char] || c == classOf[java.lang.Character]) => 
-          () => new Object2CharOpenHashMap[Any]
+          () => new Object2CharOpenHashMap[K]
         case c if (c == classOf[Short] || c == classOf[java.lang.Short]) => 
-          () => new Object2ShortOpenHashMap[Any]
+          () => new Object2ShortOpenHashMap[K]
         case c if (c == classOf[Int] || c == classOf[java.lang.Integer]) => 
-          () => new Object2IntOpenHashMap[Any]
+          () => new Object2IntOpenHashMap[K]
         case c if (c == classOf[Long] || c == classOf[java.lang.Long]) => 
-          () => new Object2LongOpenHashMap[Any]
+          () => new Object2LongOpenHashMap[K]
         case c if (c == classOf[Float] || c == classOf[java.lang.Float]) => 
-          () => new Object2FloatOpenHashMap[Any]
+          () => new Object2FloatOpenHashMap[K]
         case c if (c == classOf[Double] || c == classOf[java.lang.Double]) => 
-          () => new Object2DoubleOpenHashMap[Any]
+          () => new Object2DoubleOpenHashMap[K]
         case _ => 
-          () => new Object2ObjectOpenHashMap[Any, Any]
+          () => new Object2ObjectOpenHashMap[K, C]
       }
-      return createMap.asInstanceOf[() => JMap[Any, Any]]
+      return createMap.asInstanceOf[() => JMap[K, C]]
     }
   }
 }
