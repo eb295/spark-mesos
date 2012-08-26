@@ -48,10 +48,12 @@ import spark.storage.BlockManagerMaster
 class SparkContext(
     master: String,
     frameworkName: String,
-    val sparkHome: String = null,
-    val jars: Seq[String] = Nil)
+    val sparkHome: String,
+    val jars: Seq[String])
   extends Logging {
   
+  def this(master: String, frameworkName: String) = this(master, frameworkName, null, Nil)
+
   // Ensure logging is initialized before we spawn any threads
   initLogging()
 
@@ -72,7 +74,6 @@ class SparkContext(
     true,
     isLocal)
   SparkEnv.set(env)
-  Broadcast.initialize(true)
 
   // Create and start the scheduler
   private var taskScheduler: TaskScheduler = {
@@ -132,7 +133,7 @@ class SparkContext(
   }
 
   /**
-   * Get an RDD for a Hadoop-readable dataset from a Hadooop JobConf giving its InputFormat and any
+   * Get an RDD for a Hadoop-readable dataset from a Hadoop JobConf giving its InputFormat and any
    * other necessary info (e.g. file name for a filesystem-based dataset, table name for HyperTable,
    * etc).
    */
@@ -182,15 +183,12 @@ class SparkContext(
   /** Get an RDD for a Hadoop file with an arbitrary new API InputFormat. */
   def newAPIHadoopFile[K, V, F <: NewInputFormat[K, V]](path: String)
       (implicit km: ClassManifest[K], vm: ClassManifest[V], fm: ClassManifest[F]): RDD[(K, V)] = {
-    val job = new NewHadoopJob
-    NewFileInputFormat.addInputPath(job, new Path(path))
-    val conf = job.getConfiguration
     newAPIHadoopFile(
         path,
         fm.erasure.asInstanceOf[Class[F]],
         km.erasure.asInstanceOf[Class[K]],
         vm.erasure.asInstanceOf[Class[V]],
-        conf)
+        new Configuration)
   }
 
   /** 
@@ -275,30 +273,36 @@ class SparkContext(
   }
 
   /** Build the union of a list of RDDs. */
-  def union[T: ClassManifest](rdds: RDD[T]*): RDD[T] = new UnionRDD(this, rdds)
+  def union[T: ClassManifest](rdds: Seq[RDD[T]]): RDD[T] = new UnionRDD(this, rdds)
+
+  /** Build the union of a list of RDDs. */
+  def union[T: ClassManifest](first: RDD[T], rest: RDD[T]*): RDD[T] =
+    new UnionRDD(this, Seq(first) ++ rest)
 
   // Methods for creating shared variables
 
   def accumulator[T](initialValue: T)(implicit param: AccumulatorParam[T]) =
     new Accumulator(initialValue, param)
 
+  /**
+   * Create an accumulable shared variable, with a `+=` method
+   * @tparam T accumulator type
+   * @tparam R type that can be added to the accumulator
+   */
+  def accumulable[T,R](initialValue: T)(implicit param: AccumulableParam[T,R]) =
+    new Accumulable(initialValue, param)
+
+
   // Keep around a weak hash map of values to Cached versions?
-  def broadcast[T](value: T) = Broadcast.getBroadcastFactory.newBroadcast[T] (value, isLocal)
+  def broadcast[T](value: T) = SparkEnv.get.broadcastManager.newBroadcast[T] (value, isLocal)
 
   // Stop the SparkContext
   def stop() {
     dagScheduler.stop()
     dagScheduler = null
     taskScheduler = null
-    // TODO: Broadcast.stop(), Cache.stop()?
-    env.mapOutputTracker.stop()
-    env.cacheTracker.stop()
-    env.shuffleFetcher.stop()
-    env.shuffleManager.stop()
-    env.blockManager.stop()
-    BlockManagerMaster.stopBlockManagerMaster()
-    env.actorSystem.shutdown()
-    env.actorSystem.awaitTermination()
+    // TODO: Cache.stop()?
+    env.stop()
     SparkEnv.set(null)
     ShuffleMapTask.clearCache()
     logInfo("Successfully stopped SparkContext")
