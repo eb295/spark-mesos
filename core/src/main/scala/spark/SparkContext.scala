@@ -435,6 +435,17 @@ class SparkContext(
     }
   }
 
+/**
+ * Return a map of the form:
+ * {hostID : (maxMem, memRemaining, {rddID : (memSize, diskSize)})}
+ */
+  def getSlavesStorageStatus(requestedRdds: Seq[Int]):
+    Map[String, (Long, Long, Map[Int, Pair[Long, Long]])] = {
+    env.blockManager.master.getStorageStatus(requestedRdds).map { case(blockManagerId, mem) =>
+      (blockManagerId.ip + ":" + blockManagerId.port, mem)
+    }
+  }
+
   /**
    * Clear the job's list of files added by `addFile` so that they do not get donwloaded to
    * any new nodes.
